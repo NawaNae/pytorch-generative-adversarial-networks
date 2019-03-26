@@ -222,11 +222,11 @@ def train():
             d_real_decision = D(preprocess(d_real_data))#先前置處理(預設使用 高斯分布的幾個數值 mean std zscore等 來訓練D)
             d_real_error = criterion(d_real_decision, Variable(torch.ones([1,1])))  # ones = true 應該是將決策的跟Tensor([[1]])目標來計算loss (透過BCE) y , y'計算
             d_real_error.backward() # compute/store gradients, but don't change params
-
+            #透過真實資料訓練D，累積梯度
             #  1B: Train D on fake
             d_gen_input = Variable(gi_sampler(minibatch_size, g_input_size))
             d_fake_data = G(d_gen_input).detach()  # detach to avoid training G on these labels
-         
+            
             d_fake_decision = D(preprocess(d_fake_data.t()))
             #torch.t or tensor.t -> tensor  即matrix transpose運算 ->交換row、col
             #size(500,1)->(1,500)
@@ -247,6 +247,7 @@ def train():
                 [-0.3821, -0.3846, ... , -0.1234] <- Row1
             ])
             """
+            #這裡是透過G來生假資料訓練D得到假的Loss，理論上y=0(因為是假的資料)即 從真實資料來的機率判斷為0
             d_fake_error = criterion(d_fake_decision, Variable(torch.zeros([1,1])))  # zeros = fake
             d_fake_error.backward()
             d_optimizer.step()     # Only optimizes D's parameters; changes based on stored gradients from backward()
@@ -260,6 +261,7 @@ def train():
             gen_input = Variable(gi_sampler(minibatch_size, g_input_size))#產生(minib,g_size)的uniform雜訊
             g_fake_data = G(gen_input)#透過雜訊生成假樣本
             dg_fake_decision = D(preprocess(g_fake_data.t()))#transpose並前置處理提取四項機率數值到D給D判斷
+            #只透過D來訓練G
             g_error = criterion(dg_fake_decision, Variable(torch.ones([1,1])))  # Train G to pretend it's genuine 算Loss
 
             g_error.backward()
