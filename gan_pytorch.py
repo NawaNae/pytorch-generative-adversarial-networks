@@ -16,8 +16,8 @@ except ImportError:
   print("Will skip plotting; matplotlib is not available.")
   matplotlib_is_available = False
 # Data params
-data_mean = 4
-data_stddev = 1.25
+data_mean = 4 #真實資料的平均值 用來透過np.random.normal生成高斯分布
+data_stddev = 1.25 #真實資料的標準差 用來透過np.random.normal生成高斯分布
 
 # ### Uncomment only one of these to define what data is actually sent to the Discriminator
 #(name, preprocess, d_input_func) = ("Raw data", lambda data: data, lambda x: x)
@@ -31,9 +31,10 @@ print("Using data [%s]" % (name))
 
 def get_distribution_sampler(mu, sigma):
     return lambda n: torch.Tensor(np.random.normal(mu, sigma, (1, n)))  # Gaussian
-
+    #高斯分布
 def get_generator_input_sampler():
     return lambda m, n: torch.rand(m, n)  # Uniform-dist data into generator, _NOT_ Gaussian
+    #生成size=(m,n)的uniform分布tensor
 
 # ##### MODELS: Generator model and discriminator model
 
@@ -57,6 +58,7 @@ class Generator(nn.Module):
         return x
     #To Check Network Size When Debug Mode
     def firstForward(self,x):
+        #測試用
         print('---Generator---')
         print('input size : ',x.size())
         x = self.map1(x)
@@ -79,6 +81,7 @@ class Discriminator(nn.Module):
         self.map3 = nn.Linear(hidden_size, output_size)
         self.f = f
     def firstForward(self,x):
+        #測試用
         print("---Discriminator---")
         print('input size:',x.size())
         x = self.f(self.map1(x))
@@ -98,6 +101,12 @@ class Discriminator(nn.Module):
         
 
 def extract(v):
+    """
+    將v tensor中的東西解開成list回傳
+    v: Tensor([float])
+    Return : List[]
+    """ 
+    #print("v : ",v,"\tv storage:",v.data.storage().tolist())   
     return v.data.storage().tolist()
 
 def stats(d):
@@ -108,7 +117,7 @@ def get_moments(d):
     mean = torch.mean(d)
     #平均 Ex
     diffs = d - mean
-    #所有項目跟平均的差 (輸入Tensor(500,1))
+    #所有項目跟平均的差 (輸入Tensor(1,500))
     
     #假設
     """
@@ -141,6 +150,7 @@ def get_moments(d):
     #把所有差平方再取平均，就變成變異數Variance
     std = torch.pow(var, 0.5)
     #標準差 standard deviation，變異數開根號
+    #不過其實torch有提供torch.std 只是他要用到diffs之類的所以才會自己算
     zscores = diffs / std
     #標準分數 a.k.a. 標準化值 z-score a.k.a. standard score
     skews = torch.mean(torch.pow(zscores, 3.0))
@@ -164,7 +174,9 @@ def train():
     g_input_size = 1      # Random noise dimension coming into generator, per output vector
     g_hidden_size = 5     # Generator complexity
     g_output_size = 1     # Size of generated output vector
-    d_input_size = 500    # Minibatch size - cardinality of distributions
+    d_input_size = 500    # Minibatch size - cardinality of distributions 
+    #注意到，這個是實際資料的長度，因為傳遞給D的前置處理可以切換，所以實際網路的輸入size不是這個
+    #需在前置處理裡面定義處理d_input_size的d_input_func(d_input_size)
     d_hidden_size = 10    # Discriminator complexity
     d_output_size = 1     # Single dimension for 'real' vs. 'fake' classification
     minibatch_size = d_input_size
@@ -198,35 +210,57 @@ def train():
     d_optimizer = optim.SGD(D.parameters(), lr=d_learning_rate, momentum=sgd_momentum)
     g_optimizer = optim.SGD(G.parameters(), lr=g_learning_rate, momentum=sgd_momentum)
 
-    for epoch in range(num_epochs):
+    for epoch in range(num_epochs):#就訓練那麼多次 沒有特殊終止條件
         for d_index in range(d_steps):
             # 1. Train D on real+fake
             D.zero_grad()
+            #清空梯度累積值
 
             #  1A: Train D on real
-            d_real_data = Variable(d_sampler(d_input_size))# N=500的高斯分布(長度為500)
-            d_real_decision = D(preprocess(d_real_data))
-            d_real_error = criterion(d_real_decision, Variable(torch.ones([1,1])))  # ones = true
+            d_real_data = Variable(d_sampler(d_input_size))# N=500的高斯分布(長度為500) size(1,500)
+            
+            d_real_decision = D(preprocess(d_real_data))#先前置處理(預設使用 高斯分布的幾個數值 mean std zscore等 來訓練D)
+            d_real_error = criterion(d_real_decision, Variable(torch.ones([1,1])))  # ones = true 應該是將決策的跟Tensor([[1]])目標來計算loss (透過BCE) y , y'計算
             d_real_error.backward() # compute/store gradients, but don't change params
 
             #  1B: Train D on fake
             d_gen_input = Variable(gi_sampler(minibatch_size, g_input_size))
             d_fake_data = G(d_gen_input).detach()  # detach to avoid training G on these labels
+         
             d_fake_decision = D(preprocess(d_fake_data.t()))
+            #torch.t or tensor.t -> tensor  即matrix transpose運算 ->交換row、col
+            #size(500,1)->(1,500)
+            """
+            d_fack_data.size() # -> ()
+            tensor(
+            [
+                #    V Col1
+                [-0.3821], # <-Row1
+                [-0.3846], # <-Row2
+                [-0.4510], # ...
+                ...,
+                [-0.1234] #<- RowN
+            ])
+            ----via method t()--->
+            tensor(
+            [      #Col1V      Col2V ...      ColN V
+                [-0.3821, -0.3846, ... , -0.1234] <- Row1
+            ])
+            """
             d_fake_error = criterion(d_fake_decision, Variable(torch.zeros([1,1])))  # zeros = fake
             d_fake_error.backward()
             d_optimizer.step()     # Only optimizes D's parameters; changes based on stored gradients from backward()
 
-            dre, dfe = extract(d_real_error)[0], extract(d_fake_error)[0]
+            dre, dfe = extract(d_real_error)[0], extract(d_fake_error)[0]#因為回傳的List都只有一個項目 所以取[0]得到element
 
         for g_index in range(g_steps):
             # 2. Train G on D's response (but DO NOT train D on these labels)
             G.zero_grad()
 
-            gen_input = Variable(gi_sampler(minibatch_size, g_input_size))
-            g_fake_data = G(gen_input)
-            dg_fake_decision = D(preprocess(g_fake_data.t()))
-            g_error = criterion(dg_fake_decision, Variable(torch.ones([1,1])))  # Train G to pretend it's genuine
+            gen_input = Variable(gi_sampler(minibatch_size, g_input_size))#產生(minib,g_size)的uniform雜訊
+            g_fake_data = G(gen_input)#透過雜訊生成假樣本
+            dg_fake_decision = D(preprocess(g_fake_data.t()))#transpose並前置處理提取四項機率數值到D給D判斷
+            g_error = criterion(dg_fake_decision, Variable(torch.ones([1,1])))  # Train G to pretend it's genuine 算Loss
 
             g_error.backward()
             g_optimizer.step()  # Only optimizes G's parameters
