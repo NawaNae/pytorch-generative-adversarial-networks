@@ -8,14 +8,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
-
+DEBUG=True
 matplotlib_is_available = True
 try:
   from matplotlib import pyplot as plt
 except ImportError:
   print("Will skip plotting; matplotlib is not available.")
   matplotlib_is_available = False
-
 # Data params
 data_mean = 4
 data_stddev = 1.25
@@ -41,31 +40,62 @@ def get_generator_input_sampler():
 class Generator(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, f):
         super(Generator, self).__init__()
+        self.first_froward=True
         self.map1 = nn.Linear(input_size, hidden_size)
         self.map2 = nn.Linear(hidden_size, hidden_size)
         self.map3 = nn.Linear(hidden_size, output_size)
         self.f = f
-
     def forward(self, x):
+        if self.first_froward and DEBUG:
+            self.first_froward=False
+            return self.firstForward(x)
         x = self.map1(x)
         x = self.f(x)
         x = self.map2(x)
         x = self.f(x)
         x = self.map3(x)
         return x
+    #To Check Network Size When Debug Mode
+    def firstForward(self,x):
+        print('---Generator---')
+        print('input size : ',x.size())
+        x = self.map1(x)
+        x = self.f(x)
+        print('hidden1 size : ',x.size())
+        x = self.map2(x)
+        x = self.f(x)
+        print('hidden2 size : ',x.size())
+        x = self.map3(x)
+        print('output size : ',x.size())
+        return x
+
 
 class Discriminator(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, f):
         super(Discriminator, self).__init__()
+        self.first_froward=True
         self.map1 = nn.Linear(input_size, hidden_size)
         self.map2 = nn.Linear(hidden_size, hidden_size)
         self.map3 = nn.Linear(hidden_size, output_size)
         self.f = f
-
+    def firstForward(self,x):
+        print("---Discriminator---")
+        print('input size:',x.size())
+        x = self.f(self.map1(x))
+        print('hidden 1 size:',x.size())
+        x = self.f(self.map2(x))
+        print('hidden 2 size:',x.size())
+        x=self.f(self.map3(x))
+        print('output size',x.size())
+        return x
     def forward(self, x):
+        if self.first_froward and DEBUG:
+            self.first_froward=False
+            return self.firstForward(x)
         x = self.f(self.map1(x))
         x = self.f(self.map2(x))
         return self.f(self.map3(x))
+        
 
 def extract(v):
     return v.data.storage().tolist()
@@ -76,12 +106,47 @@ def stats(d):
 def get_moments(d):
     # Return the first 4 moments of the data provided
     mean = torch.mean(d)
+    #平均 Ex
     diffs = d - mean
+    #所有項目跟平均的差 (輸入Tensor(500,1))
+    
+    #假設
+    """
+    d=Tensor(
+    [
+        [1],
+        [2],
+        [3],
+        ...,
+        [500]
+    ])
+    mean=10
+    """
+    #則
+    """
+    d-mean=Tensor(
+        [
+            [-9],
+            [-8],
+            [-7],
+            ...,
+            [490]
+        ]      
+    )
+    """
+    #相當於 [[xi] - mean for xi in p] 也就是數學上 所有數字跟平均的差
+ 
+    
     var = torch.mean(torch.pow(diffs, 2.0))
+    #把所有差平方再取平均，就變成變異數Variance
     std = torch.pow(var, 0.5)
+    #標準差 standard deviation，變異數開根號
     zscores = diffs / std
+    #標準分數 a.k.a. 標準化值 z-score a.k.a. standard score
     skews = torch.mean(torch.pow(zscores, 3.0))
+    #偏度 Skewness 偏度衡量實數隨機變量機率分布的不對稱性
     kurtoses = torch.mean(torch.pow(zscores, 4.0)) - 3.0  # excess kurtosis, should be 0 for Gaussian
+    #kurtosis的複數 表示PDF在平均附近增減的趨勢 可以翻譯為陡峭的程度
     final = torch.cat((mean.reshape(1,), std.reshape(1,), skews.reshape(1,), kurtoses.reshape(1,)))
     return final
 
@@ -104,7 +169,7 @@ def train():
     d_output_size = 1     # Single dimension for 'real' vs. 'fake' classification
     minibatch_size = d_input_size
 
-    d_learning_rate = 1e-3
+    d_learning_rate = 1e-3 # 10^-3 = 0.001
     g_learning_rate = 1e-3
     sgd_momentum = 0.9
 
@@ -113,7 +178,7 @@ def train():
     d_steps = 20
     g_steps = 20
 
-    dfe, dre, ge = 0, 0, 0
+    dfe, dre, ge = 0, 0, 0 #d real error, d fack error, g error
     d_real_data, d_fake_data, g_fake_data = None, None, None
 
     discriminator_activation_function = torch.sigmoid
@@ -139,7 +204,7 @@ def train():
             D.zero_grad()
 
             #  1A: Train D on real
-            d_real_data = Variable(d_sampler(d_input_size))
+            d_real_data = Variable(d_sampler(d_input_size))# N=500的高斯分布(長度為500)
             d_real_decision = D(preprocess(d_real_data))
             d_real_error = criterion(d_real_decision, Variable(torch.ones([1,1])))  # ones = true
             d_real_error.backward() # compute/store gradients, but don't change params
